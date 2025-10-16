@@ -56,7 +56,22 @@
     .now-playing { gap:4px; }
     .upload-row { gap:6px; }
     .hint { font-size:12px; opacity:0.65; line-height:1.4; }
-    input[type="file"] { font-size:13px; color:#d2e3ff; }
+    .file-input {
+      display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+    }
+    .file-input input[type="file"] {
+      position:absolute;
+      width:1px; height:1px; padding:0; margin:-1px;
+      overflow:hidden; clip:rect(0,0,0,0); border:0;
+    }
+    .file-trigger {
+      display:inline-flex; align-items:center; justify-content:center;
+      padding:8px 12px; border-radius:10px; border: 1px solid rgba(255,255,255,.12);
+      background:#151922; color:#cfe3ff; cursor:pointer; font-size:13px;
+      flex:0 0 auto; min-height:34px; line-height:1.2;
+    }
+    .file-trigger:hover { background:#1b2130; }
+    .file-status { font-size:12px; opacity:0.75; }
     #dropOverlay {
       position: fixed; inset:0;
       background: rgba(36,66,106,0.25);
@@ -77,13 +92,21 @@
   <div id="ui">
     <div class="row upload-row">
       <span class="field-label">Upload Models:</span>
-      <input id="modelUpload" type="file" multiple accept=".glb,.gltf,.bin" />
+      <div class="file-input">
+        <input id="modelUpload" type="file" multiple accept=".glb,.gltf,.bin" />
+        <label class="file-trigger" for="modelUpload">Select Files</label>
+        <span class="file-status" id="modelUploadStatus">No files selected</span>
+      </div>
       <span class="hint">Select or drag multiple .glb / .gltf / .bin files.</span>
     </div>
 
     <div class="row upload-row">
       <span class="field-label">Upload Textures:</span>
-      <input id="textureUpload" type="file" multiple accept=".png,.jpg,.jpeg,.webp,.avif,.ktx2,.basis,.dds,.tga,.bmp,.gif" />
+      <div class="file-input">
+        <input id="textureUpload" type="file" multiple accept=".png,.jpg,.jpeg,.webp,.avif,.ktx2,.basis,.dds,.tga,.bmp,.gif" />
+        <label class="file-trigger" for="textureUpload">Select Files</label>
+        <span class="file-status" id="textureUploadStatus">No files selected</span>
+      </div>
       <span class="hint">Texture filenames must match the model references.</span>
     </div>
 
@@ -172,9 +195,22 @@
     const modelUploadInput = document.querySelector('#modelUpload');
     const textureUploadInput = document.querySelector('#textureUpload');
     const dropOverlay = document.querySelector('#dropOverlay');
+    const modelUploadStatus = document.querySelector('#modelUploadStatus');
+    const textureUploadStatus = document.querySelector('#textureUploadStatus');
 
     const setNowPlaying = (text = '') => {
       if (nowPlaying) nowPlaying.textContent = text;
+    };
+
+    const setFileStatus = (el, files = []) => {
+      if (!el) return;
+      if (!files.length) {
+        el.textContent = 'No files selected';
+      } else if (files.length === 1) {
+        el.textContent = files[0].name;
+      } else {
+        el.textContent = `${files.length} files selected`;
+      }
     };
 
     const modelRegistry = new Map();
@@ -204,15 +240,19 @@
     fadeInSlider.addEventListener('input', () => fadeInVal.textContent = parseFloat(fadeInSlider.value).toFixed(2));
 
     modelUploadInput.addEventListener('change', e => {
-      if (e.target.files?.length) {
-        processIncomingFiles(e.target.files);
+      const files = Array.from(e.target.files || []);
+      setFileStatus(modelUploadStatus, files);
+      if (files.length) {
+        processIncomingFiles(files);
       }
       e.target.value = '';
     });
 
     textureUploadInput.addEventListener('change', e => {
-      if (e.target.files?.length) {
-        registerAssets(Array.from(e.target.files));
+      const files = Array.from(e.target.files || []);
+      setFileStatus(textureUploadStatus, files);
+      if (files.length) {
+        registerAssets(files);
       }
       e.target.value = '';
     });
