@@ -18,7 +18,7 @@ Then browse to the URL printed in the terminal (for example <http://localhost:30
 The repository includes a GitHub Actions workflow that automatically publishes the site to GitHub Pages whenever you push to the `main` branch.
 
 1. Push this repository to GitHub and make sure your default branch is named `main`.
-2. In your GitHub repository, open **Settings → Pages** and under **Build and deployment**, choose **GitHub Actions** as the source.
+2. In your GitHub repository, open **Settings → Pages** and ensure **Build and deployment** is set to **GitHub Actions**. (The workflow will automatically enable Pages if it is the first deployment.)
 3. The `Deploy static site to GitHub Pages` workflow will build and deploy the contents of the repository to the `gh-pages` branch automatically on every push to `main`. You can also trigger it manually from the **Actions** tab using the `Run workflow` button.
 4. After the first successful run, the public site URL appears both in the workflow run summary and on the **Settings → Pages** page.
 
