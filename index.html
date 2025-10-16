@@ -72,6 +72,8 @@
     }
     .file-trigger:hover { background:#1b2130; }
     .file-status { font-size:12px; opacity:0.75; }
+    .animations-header { flex-direction:row; align-items:center; justify-content:space-between; }
+    .animations-header .checkbox { margin-left:auto; }
     #dropOverlay {
       position: fixed; inset:0;
       background: rgba(36,66,106,0.25);
@@ -138,7 +140,13 @@
       </label>
     </div>
 
-    <span class="field-label">Animations:</span>
+    <div class="row animations-header">
+      <span class="field-label">Animations:</span>
+      <label class="checkbox" for="multiToggle">
+        <input id="multiToggle" type="checkbox" />
+        Multi-play
+      </label>
+    </div>
     <div id="clips"></div>
     <span id="nowPlaying" style="display:none;"></span>
   </div>
@@ -203,6 +211,7 @@
     const fadeInSlider = document.querySelector('#fadeIn');
     const fadeInVal = document.querySelector('#fadeInVal');
     const loopToggle = document.querySelector('#loopToggle');
+    const multiToggle = document.querySelector('#multiToggle');
     const envSlider = document.querySelector('#envIntensity');
     const envVal = document.querySelector('#envIntensityVal');
     const modelUploadInput = document.querySelector('#modelUpload');
@@ -246,6 +255,34 @@
       dir.intensity = INITIAL_DIR_INTENSITY * value;
     };
 
+    const stopAction = name => {
+      const action = activeActions.get(name);
+      if (!action) return;
+      action.stop();
+      activeActions.delete(name);
+      if (!activeActions.size) {
+        setNowPlaying('');
+      }
+    };
+
+    const stopAllActions = () => {
+      activeActions.forEach(action => action.stop());
+      activeActions.clear();
+      setNowPlaying('');
+    };
+
+    const updateClipButtons = () => {
+      const activeNames = [...activeActions.keys()];
+      const activeSet = new Set(activeNames);
+      [...clipsPanel.children].forEach(btn => {
+        const clipName = btn.dataset.name || btn.textContent;
+        btn.classList.toggle('active', activeSet.has(clipName));
+      });
+      if (activeNames.length) {
+        setNowPlaying(activeNames.join(', '));
+      }
+    };
+
     const modelRegistry = new Map();
     const assetMap = new Map();
     const MODEL_EXTENSIONS = new Set(['glb','gltf']);
@@ -267,7 +304,8 @@
 
     const DEFAULT_MODEL_KEY = 'lv3-character-zombie.glb';
 
-    let mixer, activeAction, model, gltfAnimations = [];
+    let mixer, model, gltfAnimations = [];
+    const activeActions = new Map();
     const clock = new THREE.Clock();
     let loadRequestId = 0;
 
@@ -282,6 +320,23 @@
       envSlider.addEventListener('input', () => {
         const value = parseFloat(envSlider.value) || 0;
         syncEnvSlider(value);
+      });
+    }
+
+    if (multiToggle) {
+      multiToggle.addEventListener('change', () => {
+        if (!multiToggle.checked) {
+          const names = [...activeActions.keys()];
+          if (names.length > 1) {
+            const keep = names[names.length - 1];
+            stopAllActions();
+            if (keep) {
+              playClip(keep);
+              return;
+            }
+          }
+        }
+        updateClipButtons();
       });
     }
 
@@ -355,10 +410,10 @@
       }
       model = null;
       mixer = null;
-      activeAction = null;
       gltfAnimations = [];
-      setNowPlaying('');
+      stopAllActions();
       clipsPanel.innerHTML = '';
+      updateClipButtons();
 
       try {
         const gltf = await loader.loadAsync(source);
@@ -516,16 +571,20 @@ function processIncomingFiles(fileList){
       return idx >= 0 ? name.slice(idx + 1).toLowerCase() : '';
     }
 
-function rebuildButtons(animations){
+    function rebuildButtons(animations){
       clipsPanel.innerHTML = '';
       const sorted = [...animations].sort((a,b)=> a.name.localeCompare(b.name));
       sorted.forEach(clip => {
         const btn = document.createElement('button');
-        btn.textContent = clip.name || 'Animation';
+        const clipName = clip.name || 'Animation';
+        btn.type = 'button';
+        btn.textContent = clipName;
         btn.className = 'btn';
+        btn.dataset.name = clipName;
         btn.addEventListener('click', () => playClip(clip.name));
         clipsPanel.appendChild(btn);
       });
+      updateClipButtons();
     }
 
     function pickDefaultClip(anims){
@@ -543,23 +602,38 @@ function rebuildButtons(animations){
       const clip = THREE.AnimationClip.findByName(gltfAnimations, name);
       if (!clip) return;
 
-      const fadeIn = parseFloat(fadeInSlider.value) || 0.2;
-
-      const next = mixer.clipAction(clip);
+      const allowMulti = multiToggle?.checked ?? false;
       const isLoop = loopToggle.checked;
-      next.setLoop(isLoop ? THREE.LoopRepeat : THREE.LoopOnce, isLoop ? Infinity : 0);
-      next.clampWhenFinished = !isLoop;
-      next.reset();
+      const fadeIn = parseFloat(fadeInSlider.value) || 0.2;
+      const action = mixer.clipAction(clip);
+      const isAlreadyActive = activeActions.has(name);
 
-      if (activeAction && activeAction !== next) {
-        activeAction.crossFadeTo(next, fadeIn, false);
+      if (allowMulti && isAlreadyActive) {
+        stopAction(name);
+        updateClipButtons();
+        return;
       }
-      next.play();
-      activeAction = next;
 
-      // Update UI highlight
-      [...clipsPanel.children].forEach(b => b.classList.toggle('active', b.textContent === name));
-      setNowPlaying(name);
+      action.setLoop(isLoop ? THREE.LoopRepeat : THREE.LoopOnce, isLoop ? Infinity : 0);
+      action.clampWhenFinished = !isLoop;
+      action.reset();
+
+      if (allowMulti) {
+        action.play();
+        activeActions.set(name, action);
+      } else {
+        const previousActions = [...activeActions.values()];
+        action.play();
+        previousActions.forEach(prev => {
+          if (prev && prev !== action) {
+            prev.crossFadeTo(action, fadeIn, false);
+          }
+        });
+        activeActions.clear();
+        activeActions.set(name, action);
+      }
+
+      updateClipButtons();
     }
 
     // ---------- Events ----------
