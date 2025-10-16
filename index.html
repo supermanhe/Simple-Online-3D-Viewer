@@ -118,6 +118,14 @@
 
   <div id="animationPanel">
     <div class="row">
+      <label class="field-label" for="envIntensity">Environment Brightness:</label>
+      <div class="rangeRow">
+        <input id="envIntensity" type="range" min="0" max="2" step="0.05" value="1.00" />
+        <span id="envIntensityVal">1.00</span>
+      </div>
+    </div>
+
+    <div class="row">
       <label class="field-label" for="fadeIn">Fade In (s):</label>
       <div class="rangeRow">
         <input id="fadeIn" type="range" min="0" max="1.0" step="0.05" value="0.25" />
@@ -177,6 +185,9 @@
     dir.shadow.mapSize.set(2048,2048);
     scene.add(dir);
 
+    const INITIAL_HEMI_INTENSITY = hemi.intensity;
+    const INITIAL_DIR_INTENSITY = dir.intensity;
+
     const ground = new THREE.Mesh(
       new THREE.CircleGeometry(6, 60),
       new THREE.MeshStandardMaterial({ color: 0x0f141d, metalness:0.0, roughness:0.95 })
@@ -192,6 +203,8 @@
     const fadeInSlider = document.querySelector('#fadeIn');
     const fadeInVal = document.querySelector('#fadeInVal');
     const loopToggle = document.querySelector('#loopToggle');
+    const envSlider = document.querySelector('#envIntensity');
+    const envVal = document.querySelector('#envIntensityVal');
     const modelUploadInput = document.querySelector('#modelUpload');
     const textureUploadInput = document.querySelector('#textureUpload');
     const dropOverlay = document.querySelector('#dropOverlay');
@@ -227,6 +240,12 @@
       });
     };
 
+    const applyEnvironmentIntensity = factor => {
+      const value = Math.max(0, factor);
+      hemi.intensity = INITIAL_HEMI_INTENSITY * value;
+      dir.intensity = INITIAL_DIR_INTENSITY * value;
+    };
+
     const modelRegistry = new Map();
     const assetMap = new Map();
     const MODEL_EXTENSIONS = new Set(['glb','gltf']);
@@ -251,6 +270,20 @@
     let mixer, activeAction, model, gltfAnimations = [];
     const clock = new THREE.Clock();
     let loadRequestId = 0;
+
+    const syncEnvSlider = value => {
+      if (envVal) envVal.textContent = value.toFixed(2);
+      applyEnvironmentIntensity(value);
+    };
+
+    if (envSlider) {
+      const initialEnv = parseFloat(envSlider.value) || 1;
+      syncEnvSlider(initialEnv);
+      envSlider.addEventListener('input', () => {
+        const value = parseFloat(envSlider.value) || 0;
+        syncEnvSlider(value);
+      });
+    }
 
     fadeInSlider.addEventListener('input', () => fadeInVal.textContent = parseFloat(fadeInSlider.value).toFixed(2));
 
