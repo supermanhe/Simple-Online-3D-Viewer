@@ -213,6 +213,20 @@
       }
     };
 
+    const disposeObject = root => {
+      if (!root || typeof root.traverse !== 'function') return;
+      root.traverse(node => {
+        if (node.isMesh) {
+          node.geometry?.dispose?.();
+          if (Array.isArray(node.material)) {
+            node.material.forEach(mat => mat?.dispose?.());
+          } else {
+            node.material?.dispose?.();
+          }
+        }
+      });
+    };
+
     const modelRegistry = new Map();
     const assetMap = new Map();
     const MODEL_EXTENSIONS = new Set(['glb','gltf']);
@@ -236,6 +250,7 @@
 
     let mixer, activeAction, model, gltfAnimations = [];
     const clock = new THREE.Clock();
+    let loadRequestId = 0;
 
     fadeInSlider.addEventListener('input', () => fadeInVal.textContent = parseFloat(fadeInSlider.value).toFixed(2));
 
@@ -292,13 +307,14 @@
     const loader = new GLTFLoader(loadingManager);
 
     async function loadModel(key){
+      const requestId = ++loadRequestId;
       const entry = modelRegistry.get(key);
       const source = entry ? entry.url : key;
 
       const previousModel = model;
       if (previousModel) {
         scene.remove(previousModel);
-        previousModel.traverse(o => { if (o.isMesh) { o.geometry?.dispose?.(); o.material?.dispose?.(); }});
+        disposeObject(previousModel);
       }
       if (mixer) {
         mixer.stopAllAction();
@@ -309,9 +325,15 @@
       activeAction = null;
       gltfAnimations = [];
       setNowPlaying('');
+      clipsPanel.innerHTML = '';
 
       try {
         const gltf = await loader.loadAsync(source);
+
+        if (requestId !== loadRequestId) {
+          disposeObject(gltf.scene);
+          return;
+        }
 
         model = gltf.scene;
         model.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; }});
@@ -329,6 +351,7 @@
           setNowPlaying('(no animation)');
         }
       } catch (err) {
+        if (requestId !== loadRequestId) return;
         console.error('Failed to load model:', err);
         clipsPanel.innerHTML = '';
         setNowPlaying('(load failed)');
