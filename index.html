@@ -1,0 +1,492 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>three.js Animation Switcher</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    html, body { margin:0; height:100%; background:#0b0d10; color:#e6ebf1; font-family: ui-sans-serif, system-ui; }
+    #ui {
+      position: fixed; top: 16px; left: 16px; bottom: 16px; width: 260px;
+      background: rgba(20,22,27,.85); border: 1px solid rgba(255,255,255,.1);
+      border-radius: 12px; padding: 14px; backdrop-filter: blur(6px);
+      display:flex; flex-direction:column; gap:12px;
+    }
+    #modelList {
+      display:flex; flex-direction:column; gap:6px;
+      flex:1;
+      min-height:0;
+      overflow-y:auto;
+      padding-right:4px;
+    }
+    #animationPanel {
+      position: fixed; top: 16px; right: 16px; bottom: 16px; width: 260px;
+      background: rgba(20,22,27,.85); border: 1px solid rgba(255,255,255,.1);
+      border-radius: 12px; padding: 14px; backdrop-filter: blur(6px);
+      display:flex; flex-direction:column; gap:12px;
+    }
+    #clips {
+      flex:1;
+      display:flex; flex-direction:column; gap: 6px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+    .model-btn,
+    .btn {
+      width: 100%;
+      padding: 8px 10px; border-radius: 10px; border: 1px solid rgba(255,255,255,.12);
+      background: #151922; color:#cfe3ff; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align:left;
+      flex: 0 0 auto; min-height: 34px; line-height: 1.2;
+    }
+    .model-btn:hover,
+    .btn:hover { background:#1b2130; }
+    .model-btn.active,
+    .btn.active { background:#24416a; border-color:#4e83d8; }
+    .row { display:flex; flex-direction:column; gap:8px; flex:0 0 auto; }
+    .models-row { flex:1; min-height:0; }
+    input[type="range"], input[type="checkbox"] {
+      background:#11161f; color:#cfe3ff; border:1px solid rgba(255,255,255,.12); border-radius:8px; padding:6px;
+    }
+    label { opacity:.9; font-size:14px; }
+    .field-label { font-weight:500; }
+    .rangeRow { display:flex; align-items:center; gap:8px; }
+    .rangeRow input[type="range"] { flex:1; }
+    .checkbox { display:flex; align-items:center; gap:6px; cursor:pointer; }
+    .checkbox input { width:auto; }
+    .now-playing { gap:4px; }
+    .upload-row { gap:6px; }
+    .hint { font-size:12px; opacity:0.65; line-height:1.4; }
+    input[type="file"] { font-size:13px; color:#d2e3ff; }
+    #dropOverlay {
+      position: fixed; inset:0;
+      background: rgba(36,66,106,0.25);
+      border: 2px dashed rgba(111,175,255,0.6);
+      color:#d7e6ff;
+      font-size:20px;
+      display:none;
+      align-items:center;
+      justify-content:center;
+      pointer-events:none;
+      z-index:10;
+      text-shadow:0 1px 3px rgba(0,0,0,0.6);
+    }
+    #dropOverlay.visible { display:flex; }
+  </style>
+</head>
+<body>
+  <div id="ui">
+    <div class="row upload-row">
+      <span class="field-label">Upload Models:</span>
+      <input id="modelUpload" type="file" multiple accept=".glb,.gltf,.bin" />
+      <span class="hint">Select or drag multiple .glb / .gltf / .bin files.</span>
+    </div>
+
+    <div class="row upload-row">
+      <span class="field-label">Upload Textures:</span>
+      <input id="textureUpload" type="file" multiple accept=".png,.jpg,.jpeg,.webp,.avif,.ktx2,.basis,.dds,.tga,.bmp,.gif" />
+      <span class="hint">Texture filenames must match the model references.</span>
+    </div>
+
+    <div class="row models-row">
+      <span class="field-label">Models:</span>
+      <div id="modelList" class="model-list"></div>
+    </div>
+  </div>
+
+  <div id="animationPanel">
+    <div class="row">
+      <label class="field-label" for="fadeIn">Fade In (s):</label>
+      <div class="rangeRow">
+        <input id="fadeIn" type="range" min="0" max="1.0" step="0.05" value="0.25" />
+        <span id="fadeInVal">0.25</span>
+      </div>
+
+      <label class="checkbox" for="loopToggle">
+        <input id="loopToggle" type="checkbox" checked />
+        Loop
+      </label>
+    </div>
+
+    <span class="field-label">Animations:</span>
+    <div id="clips"></div>
+    <span id="nowPlaying" style="display:none;"></span>
+  </div>
+
+  <div id="dropOverlay">Drop files to upload models / textures</div>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.169.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.169.0/examples/jsm/"
+      }
+    }
+  </script>
+  <script type="module">
+    import * as THREE from 'three';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+    // ---------- Scene setup ----------
+    const renderer = new THREE.WebGLRenderer({ antialias:true });
+    renderer.setPixelRatio(devicePixelRatio);
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.shadowMap.enabled = true;
+    document.body.appendChild(renderer.domElement);
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0b0d10);
+
+    const camera = new THREE.PerspectiveCamera(55, window.innerWidth/window.innerHeight, 0.1, 200);
+    camera.position.set(2.5, 1.8, 3.8);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.target.set(0, 1.1, 0);
+
+    // Lighting & ground
+    const hemi = new THREE.HemisphereLight(0xbfd6ff, 0x101218, 0.6);
+    scene.add(hemi);
+
+    const dir = new THREE.DirectionalLight(0xffffff, 1.0);
+    dir.position.set(4, 6, 2);
+    dir.castShadow = true;
+    dir.shadow.mapSize.set(2048,2048);
+    scene.add(dir);
+
+    const ground = new THREE.Mesh(
+      new THREE.CircleGeometry(6, 60),
+      new THREE.MeshStandardMaterial({ color: 0x0f141d, metalness:0.0, roughness:0.95 })
+    );
+    ground.rotation.x = -Math.PI/2;
+    ground.receiveShadow = true;
+    scene.add(ground);
+
+    // ---------- DOM references & state ----------
+    const modelList = document.querySelector('#modelList');
+    const clipsPanel = document.querySelector('#clips');
+    const nowPlaying = document.querySelector('#nowPlaying');
+    const fadeInSlider = document.querySelector('#fadeIn');
+    const fadeInVal = document.querySelector('#fadeInVal');
+    const loopToggle = document.querySelector('#loopToggle');
+    const modelUploadInput = document.querySelector('#modelUpload');
+    const textureUploadInput = document.querySelector('#textureUpload');
+    const dropOverlay = document.querySelector('#dropOverlay');
+
+    const setNowPlaying = (text = '') => {
+      if (nowPlaying) nowPlaying.textContent = text;
+    };
+
+    const modelRegistry = new Map();
+    const assetMap = new Map();
+    const MODEL_EXTENSIONS = new Set(['glb','gltf']);
+    const ASSET_EXTENSIONS = new Set(['bin','png','jpg','jpeg','webp','avif','ktx2','basis','dds','tga','bmp','gif']);
+    let currentModelKey = null;
+    let modelOrderSeed = 0;
+
+    const builtinModels = [
+      { key: 'lv1-character-ghost.glb', name: 'lv1-character-ghost.glb', url: 'lv1-character-ghost.glb' },
+      { key: 'lv2-character-skeleton.glb', name: 'lv2-character-skeleton.glb', url: 'lv2-character-skeleton.glb' },
+      { key: 'lv3-character-zombie.glb', name: 'lv3-character-zombie.glb', url: 'lv3-character-zombie.glb' },
+      { key: 'lv4-character-vampire.glb', name: 'lv4-character-vampire.glb', url: 'lv4-character-vampire.glb' },
+      { key: 'lv5-character-BOSS.gltf', name: 'lv5-character-BOSS.gltf', url: 'lv5-character-BOSS.gltf' }
+    ];
+
+    builtinModels.forEach(item => {
+      modelRegistry.set(item.key, { url: item.url, name: item.name, origin: 'builtin', cleanup: null, order: modelOrderSeed++ });
+    });
+
+    const DEFAULT_MODEL_KEY = 'lv3-character-zombie.glb';
+
+    let mixer, activeAction, model, gltfAnimations = [];
+    const clock = new THREE.Clock();
+
+    fadeInSlider.addEventListener('input', () => fadeInVal.textContent = parseFloat(fadeInSlider.value).toFixed(2));
+
+    modelUploadInput.addEventListener('change', e => {
+      if (e.target.files?.length) {
+        processIncomingFiles(e.target.files);
+      }
+      e.target.value = '';
+    });
+
+    textureUploadInput.addEventListener('change', e => {
+      if (e.target.files?.length) {
+        registerAssets(Array.from(e.target.files));
+      }
+      e.target.value = '';
+    });
+
+    let dragDepth = 0;
+    window.addEventListener('dragenter', e => {
+      if (!eventHasFiles(e)) return;
+      e.preventDefault();
+      dragDepth++;
+      dropOverlay.classList.add('visible');
+    });
+
+    window.addEventListener('dragover', e => {
+      if (!eventHasFiles(e)) return;
+      e.preventDefault();
+    });
+
+    window.addEventListener('dragleave', e => {
+      if (!eventHasFiles(e)) return;
+      e.preventDefault();
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (dragDepth === 0) dropOverlay.classList.remove('visible');
+    });
+
+    window.addEventListener('drop', e => {
+      if (!eventHasFiles(e)) return;
+      e.preventDefault();
+      dragDepth = 0;
+      dropOverlay.classList.remove('visible');
+      if (e.dataTransfer?.files?.length) {
+        processIncomingFiles(e.dataTransfer.files);
+      }
+    });
+
+    const loadingManager = new THREE.LoadingManager();
+    loadingManager.setURLModifier(url => resolveAssetURL(url) ?? url);
+    const loader = new GLTFLoader(loadingManager);
+
+    async function loadModel(key){
+      const entry = modelRegistry.get(key);
+      const source = entry ? entry.url : key;
+
+      const previousModel = model;
+      if (previousModel) {
+        scene.remove(previousModel);
+        previousModel.traverse(o => { if (o.isMesh) { o.geometry?.dispose?.(); o.material?.dispose?.(); }});
+      }
+      if (mixer) {
+        mixer.stopAllAction();
+        if (previousModel) mixer.uncacheRoot(previousModel);
+      }
+      model = null;
+      mixer = null;
+      activeAction = null;
+      gltfAnimations = [];
+      setNowPlaying('');
+
+      try {
+        const gltf = await loader.loadAsync(source);
+
+        model = gltf.scene;
+        model.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; }});
+        model.position.set(0, 0, 0);
+        scene.add(model);
+
+        gltfAnimations = gltf.animations || [];
+        mixer = new THREE.AnimationMixer(model);
+        rebuildButtons(gltfAnimations);
+
+        if (gltfAnimations.length){
+          const first = pickDefaultClip(gltfAnimations);
+          playClip(first.name);
+        } else {
+          setNowPlaying('(no animation)');
+        }
+      } catch (err) {
+        console.error('Failed to load model:', err);
+        clipsPanel.innerHTML = '';
+        setNowPlaying('(load failed)');
+      }
+    }
+
+function eventHasFiles(event){
+      const types = event?.dataTransfer?.types;
+      return types ? Array.from(types).includes('Files') : false;
+    }
+
+    function renderModelList(){
+      const scrollTop = modelList.scrollTop;
+      modelList.innerHTML = '';
+      const entries = [...modelRegistry.entries()].sort((a,b) => (a[1].order ?? 0) - (b[1].order ?? 0));
+      if (!entries.length) {
+        const empty = document.createElement('div');
+        empty.className = 'hint';
+        empty.textContent = 'No models yet. Upload to begin.';
+        modelList.appendChild(empty);
+      } else {
+        entries.forEach(([key, data]) => {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'model-btn';
+          btn.dataset.key = key;
+          btn.textContent = data.origin === 'uploaded' ? `${data.name} (local)` : data.name;
+          btn.title = data.name;
+          btn.addEventListener('click', () => setActiveModel(key));
+          modelList.appendChild(btn);
+        });
+      }
+      modelList.scrollTop = scrollTop;
+      highlightModelButtons();
+    }
+
+    function highlightModelButtons(){
+      const buttons = modelList.querySelectorAll('.model-btn');
+      buttons.forEach(btn => btn.classList.toggle('active', btn.dataset.key === currentModelKey));
+    }
+
+    function setActiveModel(key){
+      if (!modelRegistry.has(key)) return;
+      if (currentModelKey !== key) {
+        currentModelKey = key;
+        highlightModelButtons();
+        loadModel(key);
+      } else {
+        highlightModelButtons();
+      }
+    }
+
+function processIncomingFiles(fileList){
+      const files = Array.from(fileList || []);
+      if (!files.length) return;
+      const modelFiles = [];
+      const assetFiles = [];
+      files.forEach(file => {
+        const ext = getExtension(file.name);
+        if (MODEL_EXTENSIONS.has(ext)) {
+          modelFiles.push(file);
+        } else if (ASSET_EXTENSIONS.has(ext)) {
+          assetFiles.push(file);
+        }
+      });
+      if (assetFiles.length) registerAssets(assetFiles);
+      if (modelFiles.length) registerModels(modelFiles);
+    }
+
+    function registerModels(files){
+      const addedKeys = [];
+      files.forEach(file => {
+        const url = URL.createObjectURL(file);
+        const key = `upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const cleanup = () => URL.revokeObjectURL(url);
+        modelRegistry.set(key, {
+          url,
+          name: file.name,
+          origin: 'uploaded',
+          cleanup,
+          order: modelOrderSeed++
+        });
+        addedKeys.push(key);
+      });
+      if (addedKeys.length){
+        renderModelList();
+        const targetKey = addedKeys[addedKeys.length - 1];
+        setActiveModel(targetKey);
+      }
+    }
+
+    function registerAssets(files){
+      files.forEach(file => {
+        const url = URL.createObjectURL(file);
+        const rel = file.webkitRelativePath && file.webkitRelativePath.length ? file.webkitRelativePath : file.name;
+        const keys = new Set();
+        const normalized = normalizePath(rel);
+        if (normalized) keys.add(normalized);
+        const base = normalizePath(rel.split('/').pop());
+        if (base) keys.add(base);
+        keys.forEach(key => {
+          const prev = assetMap.get(key);
+          if (prev && prev !== url) URL.revokeObjectURL(prev);
+          assetMap.set(key, url);
+        });
+      });
+    }
+
+    function resolveAssetURL(url){
+      if (!url) return url;
+      const normalized = normalizePath(url);
+      if (assetMap.has(normalized)) return assetMap.get(normalized);
+      const base = normalizePath(normalized.split('/').pop());
+      if (assetMap.has(base)) return assetMap.get(base);
+      return null;
+    }
+
+    function normalizePath(path){
+      if (!path) return '';
+      let clean = path.replace(/\\/g, '/').trim();
+      clean = clean.replace(/^(\.\/)+/, '');
+      while (clean.startsWith('../')) clean = clean.slice(3);
+      try { clean = decodeURIComponent(clean); } catch (err) {}
+      return clean.toLowerCase();
+    }
+
+    function getExtension(name){
+      const idx = name ? name.lastIndexOf('.') : -1;
+      return idx >= 0 ? name.slice(idx + 1).toLowerCase() : '';
+    }
+
+function rebuildButtons(animations){
+      clipsPanel.innerHTML = '';
+      const sorted = [...animations].sort((a,b)=> a.name.localeCompare(b.name));
+      sorted.forEach(clip => {
+        const btn = document.createElement('button');
+        btn.textContent = clip.name || 'Animation';
+        btn.className = 'btn';
+        btn.addEventListener('click', () => playClip(clip.name));
+        clipsPanel.appendChild(btn);
+      });
+    }
+
+    function pickDefaultClip(anims){
+      // Prefer idle/walk/run clip names when available
+      const pref = ['Idle','idle','IDLE','Walk','walk','Run','run'];
+      for (const p of pref){
+        const found = anims.find(c => c.name === p);
+        if (found) return found;
+      }
+      return anims[0];
+    }
+
+    function playClip(name){
+      if (!mixer || !gltfAnimations.length) return;
+      const clip = THREE.AnimationClip.findByName(gltfAnimations, name);
+      if (!clip) return;
+
+      const fadeIn = parseFloat(fadeInSlider.value) || 0.2;
+
+      const next = mixer.clipAction(clip);
+      const isLoop = loopToggle.checked;
+      next.setLoop(isLoop ? THREE.LoopRepeat : THREE.LoopOnce, isLoop ? Infinity : 0);
+      next.clampWhenFinished = !isLoop;
+      next.reset();
+
+      if (activeAction && activeAction !== next) {
+        activeAction.crossFadeTo(next, fadeIn, false);
+      }
+      next.play();
+      activeAction = next;
+
+      // Update UI highlight
+      [...clipsPanel.children].forEach(b => b.classList.toggle('active', b.textContent === name));
+      setNowPlaying(name);
+    }
+
+    // ---------- Events ----------
+    window.addEventListener('resize', ()=>{
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+    });
+
+    renderModelList();
+    const initialKey = modelRegistry.has(DEFAULT_MODEL_KEY) ? DEFAULT_MODEL_KEY : [...modelRegistry.keys()][0];
+    if (initialKey) {
+      setActiveModel(initialKey);
+    }
+
+    // ---------- Loop ----------
+    (function animate(){
+      requestAnimationFrame(animate);
+      const dt = clock.getDelta();
+      if (mixer) mixer.update(dt);
+      controls.update();
+      renderer.render(scene, camera);
+    })();
+  </script>
+</body>
+</html>
